@@ -5,7 +5,81 @@ format: typst
 
 ### 2024 Election Results and the 2024 District Map
 
+### Part 4
+```{r}
+library(tidyverse)
+sv <- read_csv("data/clean/g24_svprec_clean.csv")
 
+compute_metrics <- function(df, votesA = "DEMVOTE", votesB = "REPVOTE") {
+df2 <- df %>%
+mutate(votes_A = .data[[votesA]],
+votes_B = .data[[votesB]],
+total = votes_A + votes_B,
+share_A = votes_A / total,
+share_B = votes_B / total,
+winner = if_else(votes_A > votes_B, "A", "B"),
+wasted_A = if_else(winner == "A", votes_A - (total/2 + 0.5), votes_A),
+wasted_B = if_else(winner == "B", votes_B - (total/2 + 0.5), votes_B))
+mean_share <- mean(df2$share_A, na.rm = TRUE)
+median_share <- median(df2$share_A, na.rm = TRUE)
+mean_median <- mean_share - median_share
+total_wasted_A <- sum(df2$wasted_A, na.rm = TRUE)
+total_wasted_B <- sum(df2$wasted_B, na.rm = TRUE)
+efficiency_gap <- (total_wasted_A - total_wasted_B) / sum(df2$total, na.rm = TRUE)
+list(mean_median = mean_median, efficiency_gap = efficiency_gap, seats_A = sum(df2$winner == "A", na.rm = TRUE), seats_B = sum(df2$winner == "B", na.rm = TRUE))
+}
+sv <- read_csv("data/clean/g24_svprec_clean.csv")
+district_votes <- sv %>%
+group_by(CDDIST) %>%
+summarise(DEMVOTE = sum(DEMVOTE, na.rm = TRUE),
+REPVOTE = sum(REPVOTE, na.rm = TRUE))
+metrics_2024 <- compute_metrics(district_votes)
+metrics_2024
+district_votes <- sv %>%
+  group_by(CDDIST) %>%
+  summarise(
+    DEMVOTE = sum(as.numeric(CNGDEM01), na.rm = TRUE) + 
+              sum(as.numeric(CNGDEM02), na.rm = TRUE),
+    
+    REPVOTE = sum(as.numeric(CNGREP01), na.rm = TRUE) + 
+              sum(as.numeric(CNGREP02), na.rm = TRUE)
+  )
+print(district_votes)
+district_votes_contested <- district_votes %>%
+  filter((DEMVOTE + REPVOTE) > 0)
+metrics_2024 <- compute_metrics(district_votes_contested)
+print(metrics_2024)
+```
 
-### 2024 Election Results and the proposed 2025 District Map
-
+### Part 6: Calculating Gerrymandering Again for ab604_est
+```{r}
+library(tidyverse)
+ab604 <- read_csv("data/derived/ab604_estimated_votes_area_weighted.csv")
+compute_newmetrics <- function(df, votesA = "DEMVOTE", votesB = "REPVOTE") {
+  district_stats <- df %>%
+    mutate( votes_A = .data[[votesA]], votes_B = .data[[votesB]], total_votes = votes_A + votes_B) %>%
+    filter(total_votes > 0) %>%
+    mutate(share_A = votes_A / total_votes, share_B = votes_B / total_votes, winner = if_else(votes_A > votes_B, "A", "B"), votes_needed_to_win = floor(total_votes / 2) + 1,
+      wasted_A = if_else(
+        winner == "A", votes_A - votes_needed_to_win,
+        votes_A), wasted_B = if_else(
+        winner == "B", votes_B - votes_needed_to_win, votes_B))
+  mean_share  <- mean(district_stats$share_A, na.rm = TRUE)
+  median_share <- median(district_stats$share_A, na.rm = TRUE)
+  mean_median_gap <- mean_share - median_share
+  total_wasted_A <- sum(district_stats$wasted_A, na.rm = TRUE)
+  total_wasted_B <- sum(district_stats$wasted_B, na.rm = TRUE)
+  total_votes_map <- sum(district_stats$total_votes, na.rm = TRUE)
+  efficiency_gap <- (total_wasted_A - total_wasted_B) / total_votes_map
+  seats_A <- sum(district_stats$winner == "A", na.rm = TRUE)
+  seats_B <- sum(district_stats$winner == "B", na.rm = TRUE)
+  list(
+    mean_median = mean_median_gap,
+    efficiency_gap = efficiency_gap,
+    seats_A = seats_A,
+    seats_B = seats_B
+  )
+}
+metrics_ab604 <- compute_newmetrics(ab604)
+print(metrics_ab604)
+```

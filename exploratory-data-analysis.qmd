@@ -3,26 +3,78 @@ title: Exploratory Data Analysis
 format: typst
 ---
 
-### Question 1
+```{r}
+library(tidyverse)
+sv <- read_csv("data/clean/g24_svprec_clean.csv")
+```
 
-Put your question here.
+### Distribution of total votes per precinct
+```{r}
+sv <- read_csv("data/clean/g24_svprec_clean.csv")
+sv_with_votes <- sv %>%
+  filter(TOTVOTE > 0)
+sv_precinct_totals <- sv %>%
+  mutate(total_votes_precinct = rowSums(across(ends_with("VOTE")), na.rm = TRUE))
+ggplot(sv_precinct_totals, aes(x = total_votes_precinct)) +
+  geom_histogram(bins = 40, fill = "skyblue", color = "white") +
+  scale_x_log10(labels = scales::label_number()) +
+  labs( title = "Total Votes per Precinct", x = "Total votes cast ", y = "Number of precincts") +
+  theme_minimal()
+```
 
 ### Answer 1
+# Based on the data, there is a relativeley small number of pricincts with very few total votes cast (around 5), a large number of precincts with 750-1250 total votes cast some precincts, and very few precincts with ~100,000 total votes cast. 
 
-Put your answer here.
+### What were the Bottom/Top 10 Counties by Turnout Rate?
+```{r}
+county_turnout <- sv %>%
+  group_by(COUNTY) %>%
+  summarise(turnout = sum(TOTVOTE, na.rm = TRUE) / sum(TOTREG, na.rm = TRUE)) %>%
+  filter(!is.na(turnout))
 
-### Question 2
+# Top 10 plot
+county_turnout %>%
+  slice_max(order_by = turnout, n = 10) %>%
+  ggplot(aes(x = reorder(COUNTY, turnout), y = turnout)) +
+  geom_col(fill = "steelblue") +
+  coord_flip() +
+  scale_y_continuous(labels = scales::percent) +
+  labs(
+    title = "Top 10", y = "Turnout Rate", x = "County") +
+  theme_minimal()
 
-Put your question here.
+# Bottom 10 Plot 
+county_turnout %>%
+  slice_min(order_by = turnout, n = 10) %>%
+  ggplot(aes(x = reorder(COUNTY, turnout), y = turnout)) +
+  geom_col(fill = "tomato") +
+  coord_flip() +
+  scale_y_continuous(labels = scales::percent) +
+  labs(title = "Bottom 10", y = "Turnout Rate", x = "County") +
+  theme_minimal()
+```
 
 ### Answer 2
+# Based on the two plot, County 13 had the lowest turnout rate and County 3 had the highest turnout rate. 
 
-Put your answer here.
-
-### Question 3
-
-Put your question here.
+### How did winners look on a precinct-level? 
+```{r}
+library(tidyverse)
+sv <- read_csv("data/clean/g24_svprec_clean.csv")
+dem <- "CNGDEM01"
+rep <- "CNGREP01"
+sv_clean <- sv %>%
+  mutate( DEM_CNG = parse_number(.data[[dem]]),REP_CNG = parse_number(.data[[rep]])) %>%
+  filter(!is.na(DEM_CNG) & !is.na(REP_CNG)) %>%
+  mutate( winner = case_when (REP_CNG > DEM_CNG ~ "Republican", DEM_CNG > REP_CNG ~ "Democrat", DEM_CNG == REP_CNG ~ "Tie"))
+sv_clean %>%
+  count(winner) %>%
+  ggplot(aes(x = winner, y = n, fill = winner)) +
+  geom_col() +
+  scale_fill_manual(values = c("Democrat" = "blue", "Republican" = "red", "Tie" = "gray")) +
+  labs( title = "Winners", x = NULL, y = "Precincts") +
+  theme_minimal()
+```
 
 ### Answer 3
-
-Put your answer here.
+# On a precinct-level, Democrats are the winner. 

@@ -49,13 +49,11 @@ map_ab604 <- ab604_shp %>%
   st_make_valid() %>%
   left_join(ab604_est_votes, by = c("DISTRICT" = "ab604_district")) %>%
   mutate(share_A = DEMVOTE / (DEMVOTE + REPVOTE))
-print("Saving processed files...")
+print("Saving processed files")
 saveRDS(map_2024, "data/derived/map_2024.rds")
 saveRDS(map_ab604, "data/derived/map_ab604.rds")
 saveRDS(district_votes_2024, "data/derived/district_votes_2024.rds")
 saveRDS(ab604_est_votes, "data/derived/ab604_est_votes.rds")
-
-print("Processing Complete!")
 ```
 
 

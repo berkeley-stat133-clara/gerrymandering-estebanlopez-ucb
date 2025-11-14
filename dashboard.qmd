@@ -3,3 +3,177 @@ title: Dashboard
 format: dashboard
 ---
 
+# This code takes a long time to load FYI
+```{r setup, include=FALSE}
+library(tidyverse)
+library(sf)
+sv_votes <- read_csv("/Users/estebanlopez/Downloads/state_g24_sov_data_by_g24_srprec 2.csv")
+sr_shp <- st_read("/Users/estebanlopez/Downloads/srprec_state_g24_v01_shp/srprec_state_g24_v01_shp.shp")
+ab604_shp <- st_read("/Users/estebanlopez/Downloads/AB604/AB604.shp")
+
+
+ab604_est_votes <- read_csv("data/derived/ab604_estimated_votes_area_weighted.csv")
+
+dir.create("data/derived", recursive = TRUE)
+
+
+print("Processing 2024 Map... (This will be slow)")
+
+
+district_votes_2024 <- sv_votes %>%
+  group_by(CDDIST) %>%
+  summarise(
+    DEMVOTE = sum(as.numeric(CNGDEM01), na.rm = TRUE) + 
+              sum(as.numeric(CNGDEM02), na.rm = TRUE),
+    REPVOTE = sum(as.numeric(CNGREP01), na.rm = TRUE) + 
+              sum(as.numeric(CNGREP02), na.rm = TRUE)
+  )
+
+precinct_to_district_lookup <- sv_votes %>%
+  select(SRPREC_KEY, CDDIST) %>%
+  distinct() 
+map_2024_geom <- sr_shp %>%
+  st_transform(3310) %>%
+  st_buffer(0) %>% 
+  left_join(precinct_to_district_lookup, by = "SRPREC_KEY") %>%
+  group_by(CDDIST) %>%
+  summarise(geometry = st_union(geometry)) %>% 
+  st_make_valid()
+map_2024 <- map_2024_geom %>%
+  left_join(district_votes_2024, by = "CDDIST") %>%
+  mutate(share_A = DEMVOTE / (DEMVOTE + REPVOTE))
+print("Processing AB 604 Map...")
+
+map_ab604 <- ab604_shp %>%
+  st_transform(3310) %>%
+  st_make_valid() %>%
+  left_join(ab604_est_votes, by = c("DISTRICT" = "ab604_district")) %>%
+  mutate(share_A = DEMVOTE / (DEMVOTE + REPVOTE))
+print("Saving processed files...")
+saveRDS(map_2024, "data/derived/map_2024.rds")
+saveRDS(map_ab604, "data/derived/map_ab604.rds")
+saveRDS(district_votes_2024, "data/derived/district_votes_2024.rds")
+saveRDS(ab604_est_votes, "data/derived/ab604_est_votes.rds")
+
+print("Processing Complete!")
+```
+
+
+```{r setup, include=FALSE}
+library(tidyverse)
+library(sf)
+library(ggpolypath)
+library(knitr)   
+knitr::opts_chunk$set(
+  echo = FALSE,
+  warning = FALSE,
+  message = FALSE)
+DEM_REP_SCALE <- scale_fill_gradient2(
+  name = "Dem Vote Share",
+  low = "red", mid = "white", high = "blue",
+  midpoint = 0.5,
+  labels = scales::percent)
+THEME_MAP <- theme_void() +
+  theme(legend.position = "bottom")
+
+compute_metrics <- function(df, votesA = "DEMVOTE", votesB = "REPVOTE") {
+df2 <- df %>%
+mutate(votes_A = .data[[votesA]],
+votes_B = .data[[votesB]],
+total = votes_A + votes_B,
+share_A = votes_A / total,
+share_B = votes_B / total,
+winner = if_else(votes_A > votes_B, "A", "B"),
+wasted_A = if_else(winner == "A", votes_A - (total/2 + 0.5), votes_A),
+wasted_B = if_else(winner == "B", votes_B - (total/2 + 0.5), votes_B))
+mean_share <- mean(df2$share_A, na.rm = TRUE)
+median_share <- median(df2$share_A, na.rm = TRUE)
+mean_median <- mean_share - median_share
+total_wasted_A <- sum(df2$wasted_A, na.rm = TRUE)
+total_wasted_B <- sum(df2$wasted_B, na.rm = TRUE)
+efficiency_gap <- (total_wasted_A - total_wasted_B) / sum(df2$total, na.rm = TRUE)
+list(mean_median = mean_median, efficiency_gap = efficiency_gap, seats_A = sum(df2$winner == "A", na.rm = TRUE), seats_B = sum(df2$winner == "B", na.rm = TRUE))
+}
+map_2024 <- readRDS("data/derived/map_2024.rds")
+map_ab604 <- readRDS("data/derived/map_ab604.rds")
+district_votes_2024 <- readRDS("data/derived/district_votes_2024.rds")
+ab604_est_votes <- readRDS("data/derived/ab604_est_votes.rds")
+stats_2024 <- compute_metrics(district_votes_2024)
+stats_ab604 <- compute_metrics(ab604_est_votes)
+summary_table <- tibble(
+  Metric = c("Democratic Seats Won", "Mean-Median Gap", "Efficiency Gap (for Dems)"),
+  `2024 Map` = c(
+    stats_2024$seats_A,
+    scales::percent(stats_2024$mean_median, accuracy = 0.1),
+    scales::percent(stats_2024$efficiency_gap, accuracy = 0.1)),
+  `AB 604 Map (Estimated)` = c(
+    stats_ab604$seats_A,
+    scales::percent(stats_ab604$mean_median, accuracy = 0.1),
+    scales::percent(stats_ab604$efficiency_gap, accuracy = 0.1)))
+DEM_REP_SCALE <- scale_fill_gradient2(
+  name = "Dem Vote Share",
+  low = "red", mid = "white", high = "blue",
+  midpoint = 0.5,
+  labels = scales::percent)
+THEME_MAP <- theme_void() + theme(legend.position = "bottom")
+plot_2024 <- ggplot(map_2024) +
+  geom_sf(aes(fill = share_A), color = "gray50", linewidth = 0.1) + # Added color/linewidth for borders
+  DEM_REP_SCALE +
+  THEME_MAP +
+  labs(title = "2024 Congressional Map")
+
+plot_ab604 <- ggplot(map_ab604) +
+  geom_sf(aes(fill = share_A), color = "gray50", linewidth = 0.1) + # Added color/linewidth for borders
+  DEM_REP_SCALE +
+  THEME_MAP +
+  labs(title = "Proposed AB 604 Map")
+table_2024 <- tibble(
+  Metric = c("Democratic Seats Won", "Mean-Median Gap", "Efficiency Gap (for Dems)"),
+  Value = c(
+    stats_2024$seats_A,
+    scales::percent(stats_2024$mean_median, accuracy = 0.1),
+    scales::percent(stats_2024$efficiency_gap, accuracy = 0.1)))
+table_ab604 <- tibble(
+  Metric = c("Democratic Seats Won", "Mean-Median Gap", "Efficiency Gap (for Dems)"),
+  Value = c(
+    stats_ab604$seats_A,
+    scales::percent(stats_ab604$mean_median, accuracy = 0.1),
+    scales::percent(stats_ab604$efficiency_gap, accuracy = 0.1)))
+```
+
+# 2024 Map
+
+```{r}
+#| title: "2024 Metrics"
+kable(table_2024, align = "lr")
+#| title: "2024 Congressional District Map"
+plot_2024
+```
+
+# AB604 Map
+```{r}
+#| title: "AB 604 Metrics"
+kable(table_ab604, align = "lr")
+#| title: "Proposed AB 604 Map"
+plot_ab604
+```
+
+# Methodology
+
+## Data Sources
+
+My data came the 2024 precinct-level vote results and the shapefiles were from the California Statewide Database. 
+
+## Estimation Process
+
+ I used an area-weighted interpolation, in which I made several steps:
+
+1.  First, I joined the 2024 vote data to the 2024 precinct map.
+2.  Second, I spatially intersected this map with the new AB 604 district map.
+3.  Next, I calculated the area of each of sections I made, and then divided by the original precinct's total area
+4. I then used that to allocate a part of the precieinct's 2024 congressional votes to that piece
+5. Lastly, I summed all votes by their new id to get the estimated totals 
+
+## Caveats
+
+There is of course the caveat that is assumed when using the area-weighted intersection : votes are assumed to be uniformly distributed across districts. This oversimplifies the intricacies of a population and their votes. Therefore, it isn't safe to say this is a prediction; instead, this data should be interpretted as an estimate 

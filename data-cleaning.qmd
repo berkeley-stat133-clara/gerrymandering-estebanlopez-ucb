@@ -2,4 +2,60 @@
 title: Data Cleaning
 format: typst
 ---
+### Part 2
 
+```{r}
+library(tidyverse)
+library(sf)
+library(readr)
+sv_raw <- "data/g24_sov_by_g24_svprec.csv"
+sv_raw
+sv_preview <- read_lines(sv_raw, n_max = 50)
+sv_preview
+sv <- read_csv(sv_raw, guess_max = 20000, col_types = cols(.default = "c"))
+
+num_cols <- names(sv)[str_detect(names(sv), "(REG$|VOTE$|_Y$|_N$)")]
+sv <- sv %>%
+  mutate(across(all_of(num_cols), ~ str_replace_all(.x, ",", "") |> as.integer()))
+glimpse(sv)
+sv %>%
+  summarise(across(all_of(num_cols), ~ sum(is.na(.x))))
+dir.create("data/clean", showWarnings = FALSE)
+write_csv(sv, "data/clean/g24_svprec_clean.csv")
+```
+
+### Part 5
+
+```{r}
+library(sf)
+library(dplyr)
+library(readr) 
+
+dir.create("data/derived", recursive = TRUE)
+
+sr_votes <- read_csv("/Users/estebanlopez/Downloads/state_g24_sov_data_by_g24_srprec 2.csv")
+sr_shp <- st_read("/Users/estebanlopez/Downloads/srprec_state_g24_v01_shp/srprec_state_g24_v01_shp.shp")
+ab604 <- st_read("/Users/estebanlopez/Downloads/AB604/AB604.shp")
+sr_shp <- sr_shp %>% st_transform(3310) %>% st_make_valid()
+ab604  <- ab604  %>% st_transform(3310) %>% st_make_valid()
+sr_shp <- sr_shp %>% 
+  left_join(sr_votes, by = "SRPREC_KEY") %>%
+  mutate(precinct_dem_votes = as.numeric(CNGDEM01) + as.numeric(CNGDEM02), precinct_rep_votes = as.numeric(CNGREP01) + as.numeric(CNGREP02)) %>%
+  replace_na(list(precinct_dem_votes = 0, precinct_rep_votes = 0))
+intersections <- st_intersection(sr_shp, ab604 %>% select(ab604_district = DISTRICT))
+intersections <- intersections %>%
+  mutate(area_piece = st_area(geometry)) %>%
+  group_by(SRPREC_KEY) %>%
+  mutate(total_sr_area = sum(area_piece),
+         frac = as.numeric(area_piece / total_sr_area)) %>%
+  ungroup()
+intersections <- intersections %>%
+  mutate(DEMVOTE_alloc = precinct_dem_votes * frac, REPVOTE_alloc = precinct_rep_votes * frac)
+ab604_est <- intersections %>%
+  st_set_geometry(NULL) %>% 
+  group_by(ab604_district) %>%
+  summarise(DEMVOTE = sum(DEMVOTE_alloc, na.rm = TRUE),
+            REPVOTE = sum(REPVOTE_alloc, na.rm = TRUE))
+write_csv(ab604_est, "data/derived/ab604_estimated_votes_area_weighted.csv")
+print(ab604_est)
+```
